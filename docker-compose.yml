@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  vertex-ai-gemini-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vertex-ai-gemini-api
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - PROXY=${PROXY:-}
+      - TIMEOUT=${TIMEOUT:-120}
+      - MAX_RETRY=${MAX_RETRY:-3}
+      - TEXT_RESPONSE=${TEXT_RESPONSE:-true}
+      - SYSTEM_PROMPT=${SYSTEM_PROMPT:-}
+      - VERTEX_AI_BASE_API=${VERTEX_AI_BASE_API:-https://content-aiplatform.googleapis.com}
+      - RECAPTCHA_BASE_API=${RECAPTCHA_BASE_API:-https://www.google.com}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  default:
+    name: vertex-ai-gemini-network
