@@ -10,7 +10,8 @@ from loguru import logger
 from app import __version__
 from app.config import settings
 from app.routers import generate_router
-from app.services.session import close_session
+from app.services.session import get_session, close_session
+from app.services.recaptcha import recaptcha_manager
 
 
 # Configure loguru
@@ -30,10 +31,18 @@ async def lifespan(app: FastAPI):
     logger.info(f"Proxy: {settings.proxy or 'None'}")
     logger.info(f"Timeout: {settings.timeout}s")
     logger.info(f"Max retries: {settings.max_retry}")
+    logger.info(
+        f"Token refresh: TTL={settings.token_ttl}s, interval={settings.token_refresh_interval}s"
+    )
+
+    # Initialize session and start background token refresh
+    session = await get_session()
+    await recaptcha_manager.start_background_refresh(session)
 
     yield
 
     logger.info("Shutting down...")
+    await recaptcha_manager.stop_background_refresh()
     await close_session()
     logger.info("Shutdown complete")
 

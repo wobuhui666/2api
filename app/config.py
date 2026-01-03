@@ -19,6 +19,21 @@ class Settings(BaseSettings):
 
     # Retry Configuration
     max_retry: int = Field(default=3, description="Maximum retry attempts")
+    retry_base_delay: float = Field(
+        default=1.0, description="Base delay for retry backoff in seconds"
+    )
+    retry_max_delay: float = Field(
+        default=30.0, description="Maximum delay for retry backoff in seconds"
+    )
+
+    # Token Configuration
+    token_ttl: int = Field(
+        default=120, description="Token time-to-live in seconds (default 2 minutes)"
+    )
+    token_refresh_interval: int = Field(
+        default=90,
+        description="Background token refresh interval in seconds (default 1.5 minutes)",
+    )
 
     # Response Configuration
     text_response: bool = Field(

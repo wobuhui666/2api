@@ -1,6 +1,8 @@
 """Vertex AI Anonymous Provider for image generation."""
 
+import asyncio
 import json
+import random
 from curl_cffi.requests import AsyncSession
 from curl_cffi.requests.exceptions import Timeout
 from loguru import logger
@@ -44,7 +46,7 @@ class VertexAIAnonymousProvider:
 
         error_msg = None
 
-        # Retry loop
+        # Retry loop with exponential backoff
         for attempt in range(settings.max_retry):
             body["variables"]["recaptchaToken"] = recaptcha_token
 
@@ -55,24 +57,66 @@ class VertexAIAnonymousProvider:
                 response = self._build_response(result, model)
                 return response, None
 
-            # Status 3: Token expired or parameter error
+            # Status 3: Token expired or parameter error - refresh token immediately
             if status == 3:
+                logger.info("Token invalid, refreshing...")
                 recaptcha_token = await recaptcha_manager.invalidate_and_refresh(
                     self.session
                 )
                 if recaptcha_token is None:
                     logger.error("Failed to refresh recaptcha token")
                     return None, "Failed to refresh recaptcha token"
+                # Continue to next attempt without additional delay
+                logger.warning(
+                    f"Token refreshed, retrying ({attempt + 1}/{settings.max_retry})"
+                )
+                continue
+
+            # Status 8: Resource exhausted (429) - use exponential backoff
+            if status == 8:
+                if attempt < settings.max_retry - 1:
+                    delay = self._calculate_backoff_delay(attempt)
+                    logger.warning(
+                        f"Rate limited (429), waiting {delay:.1f}s before retry "
+                        f"({attempt + 1}/{settings.max_retry})"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                else:
+                    return None, error_msg or "Rate limit exceeded after max retries"
 
             # Status 999: Content blocked, no point in retrying
             if status == 999:
                 return None, error_msg
 
-            logger.warning(
-                f"Generation failed, retrying ({attempt + 1}/{settings.max_retry})"
-            )
+            # Other errors - use shorter delay
+            if attempt < settings.max_retry - 1:
+                delay = settings.retry_base_delay
+                logger.warning(
+                    f"Generation failed, waiting {delay:.1f}s before retry "
+                    f"({attempt + 1}/{settings.max_retry})"
+                )
+                await asyncio.sleep(delay)
 
         return None, error_msg or "Generation failed: max retries exceeded"
+
+    def _calculate_backoff_delay(self, attempt: int) -> float:
+        """
+        Calculate exponential backoff delay with jitter.
+        
+        Args:
+            attempt: Current attempt number (0-indexed)
+            
+        Returns:
+            Delay in seconds
+        """
+        # Exponential backoff: base_delay * 2^attempt
+        delay = settings.retry_base_delay * (2 ** attempt)
+        # Cap at max delay
+        delay = min(delay, settings.retry_max_delay)
+        # Add jitter (±10%)
+        jitter = delay * 0.1 * (2 * random.random() - 1)
+        return delay + jitter
 
     async def _call_api(
         self, body: dict
